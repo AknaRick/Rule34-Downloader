@@ -10,6 +10,7 @@ import os
 from timeit import default_timer as timer
 import urllib.request
 import tkinter as tk
+import re
 from tkinter import filedialog
 
 root = tk.Tk()
@@ -91,7 +92,9 @@ class Downloader:
         for video in webmList:
             images.append(video)
         if self.response("Create new folder?"):
-            newPathName = '_'.join(self.tags.split(" "))
+            tempTag = re.compile('[^a-zA-Z]').sub('_', self.tags)
+
+            newPathName = '_'.join(tempTag.split(" "))
             newPathName = '/'.join([self.downloadLocation, newPathName])
             if not os.path.isdir(newPathName):
                 os.mkdir(newPathName)
