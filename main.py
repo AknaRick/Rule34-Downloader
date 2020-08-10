@@ -26,7 +26,7 @@ class Downloader:
         self.connection = False  # Do we have an internet connection
         self.webm = False
         self.silent = False  # Run the script silently
-        self.debug = True
+        self.debug = False
         self.downloadLocation = None
         self.tags = ""
         self.errors = []  # list of errors used when downloading
