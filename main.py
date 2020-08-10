@@ -96,17 +96,19 @@ class Downloader:
             self.connection = False
 
     def download(self, images):
-        # todo: Add progress bar
-
         times = []
         self.debugPrint("Sorting list...")
         webmList = []
-        for image in images:
-            if "webm" in image.file_url:
-                if self.webm:
-                    webmList.append(image)
-                images.remove(image)
-
+        try:
+            for image in images:
+                if "webm" in image.id:
+                    if self.webm:
+                        webmList.append(image)
+                    images.remove(image)
+        except AttributeError:
+            print("Your version of rule34 API is out of date, please update it")
+            time.sleep(5)
+            exit()
         for video in webmList:
             images.append(video)
         if self.response("Create new folder?"):
@@ -125,7 +127,7 @@ class Downloader:
         ETA = 0
         for image in images:
             try:
-                name = "{}/{}".format(newPathName, image.file_url.split("/")[-1])
+                name = "{}/{}.{}".format(newPathName, image.id.split("/")[-1], image.file_url.split(".")[-1])
 
                 statusString = """Downloading {Downloaded}/{ToDownload}
 File name: {name}
@@ -147,7 +149,7 @@ ETA: {ETA} seconds
                     if "webm" in name:
                         print("Downloading webms... this will take longer")
                     start = timer()
-                    with urllib.request.urlopen(image.file_url) as f:
+                    with urllib.request.urlopen(image.file_url, ) as f:
                         imageContent = f.read()
                         with open(name, "wb") as f:
                             f.write(imageContent)
@@ -159,7 +161,7 @@ ETA: {ETA} seconds
                         ETA = average * (len(images) - numDownloaded)
 
             except Exception as e:
-                self.errors.append("Skipped {} due to: {}".format(image.file_url.split("/")[-1], e))
+                self.errors.append("Skipped {} due to: {}".format(image.id.split("/")[-1], e))
                 images.remove(image)
 
         self.open(self.downloadLocation)
