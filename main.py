@@ -7,6 +7,8 @@ Date: 18/07/2019
 import rule34
 import time
 import os
+import sys
+import subprocess
 from timeit import default_timer as timer
 import urllib.request
 import tkinter as tk
@@ -24,7 +26,7 @@ class Downloader:
         self.connection = False  # Do we have an internet connection
         self.webm = False
         self.silent = False  # Run the script silently
-        self.debug = False
+        self.debug = True
         self.downloadLocation = None
         self.tags = ""
         self.errors = []  # list of errors used when downloading
@@ -67,6 +69,22 @@ class Downloader:
         print("Too many invalid responses, quiting")
         time.sleep(1)
         exit(0)
+
+    @staticmethod
+    def open(path):
+        """Calls the appropriate command to open a path on windows, mac, and unix"""
+        if sys.platform == "win32":
+            os.startfile(path)
+        else:
+            command = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.call([command, path])
+
+    @staticmethod
+    def clear():
+        if sys.platform == "win32":
+            os.system("cls")
+        else:
+            os.system("clear")
 
     def checkConnection(self):
         try:
@@ -120,7 +138,7 @@ ETA: {ETA} seconds
                            name=name.replace(self.downloadLocation, self.downloadLocation.split("/")[-1]),
                            average=average, ETA=round(ETA), ProgBar=self.generateProgBar(numDownloaded, len(images)),
                            Errors='\n'.join(self.errors))
-                os.system("cls")
+                self.clear()
                 print(statusString)
                 if os.path.isfile(name):
                     print(image, "Already exists")
@@ -143,7 +161,8 @@ ETA: {ETA} seconds
             except Exception as e:
                 self.errors.append("Skipped {} due to: {}".format(image.file_url.split("/")[-1], e))
                 images.remove(image)
-        os.startfile(self.downloadLocation)
+
+        self.open(self.downloadLocation)
 
     def menu(self):
         if not self.connection:
