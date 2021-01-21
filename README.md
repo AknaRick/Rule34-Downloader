@@ -1,6 +1,3 @@
-<div style="text-align:center"><img src="https://static1.fjcdn.com/comments/Ahh+yes+_d951bbee810ba54ba379ec286a57a073.png"
-alt="drawing" width="400"/>
-
 ### What does it do?
 Downloads every image it can find on Rule34 that matches the tags you search for. 
 
@@ -10,7 +7,7 @@ Downloads every image it can find on Rule34 that matches the tags you search for
 
 ## How do i use it?
 
-Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/releases/download/V1.0.0/main.exe
+Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/raw/v1.7.4/dist/main.exe
 
 **Or**
 
