@@ -1,3 +1,5 @@
+![Image](https://i.imgur.com/bGs9kps.png)
+
 ### What does it do?
 Downloads every image it can find on Rule34 that matches the tags you search for. 
 
@@ -19,6 +21,7 @@ Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/raw/v1.7.4/
 **then**
 
 - Run main.py / main.exe and follow on screen instructions
+- If you get stuck, hover over each field for a description of what it does
 - Enjoy your excessive amount of porn
 
 ### FAQ
