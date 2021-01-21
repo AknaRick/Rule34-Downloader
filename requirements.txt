@@ -1,1 +1,2 @@
 rule34
+PyQt5
