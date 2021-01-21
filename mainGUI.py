@@ -140,25 +140,11 @@ class r34GUI:
         # disable ui so user cant modify anything
         self.toggleUI(False)
 
-        if self.totalExpected == 0:
-            self.search()
-        estimatedPages = math.ceil(self.totalExpected/100)
-        page = 0
-
-        # you could just gather all images at once, but because i want a progress bar, i iterate through the pages myself
-        for i in range(estimatedPages):
-            self.setProgBar(int((i/estimatedPages)*100))
-            newImages = r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
-
-            # occasionally r34 gives duplicate posts, this catches that
-            for image in newImages:
-                if any(x.id == image.id for x in self.imgList):
-                    newImages.remove(image)
-                    print("Removing duplicate")
-            self.imgList += newImages
-
-            ui.searchLCD.display(len(self.imgList))
-        self.setProgBar(100)
+        with self.executor as ex:
+            # gathers images in a seperate thread to avoid blocking
+            future = ex.submit(self._gatherImages)
+            while not future.done():
+                app.processEvents()
 
         if ui.downloadLimit.value() != -1:
             self.imgList = self.imgList[:ui.downloadLimit.value()]
@@ -176,6 +162,29 @@ class r34GUI:
         ui.currentTask.setText("Download Complete!")
         self.setProgBar(100)
         self.toggleUI(True)
+
+    def _gatherImages(self):
+        """Gathers images from rule34 for a given tag"""
+        if self.totalExpected == 0:
+            self.search()
+        estimatedPages = math.ceil(self.totalExpected/100)
+        # you could just gather all images at once, but because i want a progress bar, i iterate through the pages myself
+        for i in range(estimatedPages):
+            if self.stopFlag:
+                return
+            self.setProgBar(int((i / estimatedPages) * 100))
+            newImages = r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
+
+
+            # occasionally r34 gives duplicate posts, this catches that
+            for image in newImages:
+                if any(x.id == image.id for x in self.imgList):
+                    newImages.remove(image)
+                    print("Removing duplicate")
+            self.imgList += newImages
+
+            ui.searchLCD.display(len(self.imgList))
+        self.setProgBar(100)
 
     def _download(self):
         """The downloader itself"""
