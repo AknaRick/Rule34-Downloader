@@ -39,19 +39,6 @@ Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/raw/v1.7.4/
 > Yes, when running the program will ask you if you want to limit how
 > many images are downloaded
 
-**Whats this ``cachedsearch.r34`` file?**
-
->The program stores all the files it could find in this file. Should the
->program close before the download is complete; it can use this file to
->resume the download. Then when the download completes, the file gets
->deleted. If youre curious, open it in notepad
-
-**Why doesnt it have a popper gui?** 
-
->I really dont see the point in implementing one, there is only one way
->to go through this program. Plus, a fully fledged GUI would just make
->the program more resource intensive, and not add anything truly useful.
-
 # Like what I do?
 
 Why not buy me a coffee? [https://paypal.me/LordOfPolls](https://paypal.me/LordOfPolls)
