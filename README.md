@@ -9,7 +9,7 @@ Downloads every image it can find on Rule34 that matches the tags you search for
 
 ## How do i use it?
 
-Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/raw/v1.7.4/dist/main.exe
+Windows Executable: https://github.com/LordOfPolls/Rule34-Downloader/releases/download/v2.0.0/main.exe
 
 **Or**
 
