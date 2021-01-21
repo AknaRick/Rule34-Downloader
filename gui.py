@@ -80,7 +80,7 @@ class Ui_Rule34Downloader(object):
         self.searchLCD.setSmallDecimalPoint(False)
         self.searchLCD.setDigitCount(11)
         self.searchLCD.setSegmentStyle(QtWidgets.QLCDNumber.Flat)
-        self.searchLCD.setProperty("value", 99999999999.0)
+        self.searchLCD.setProperty("value", 0.0)
         self.searchLCD.setObjectName("searchLCD")
         self.horizontalLayout_2.addWidget(self.searchLCD)
         self.SearchRegion.addLayout(self.horizontalLayout_2)
