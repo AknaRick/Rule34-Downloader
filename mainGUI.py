@@ -145,6 +145,8 @@ class r34GUI:
             future = ex.submit(self._gatherImages)
             while not future.done():
                 app.processEvents()
+        self.executor.shutdown(wait=True)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
         if ui.downloadLimit.value() != -1:
             self.imgList = self.imgList[:ui.downloadLimit.value()]
