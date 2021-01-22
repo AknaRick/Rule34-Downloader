@@ -27,6 +27,10 @@ class r34GUI:
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)  # the executor for the download thread
         self.dwnTask = None  # the download thread itself
 
+    def _clearExecutor(self):
+        """Clears the executor, to avoid any access violations"""
+        self.executor.shutdown(wait=True)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     def main(self):
         # Create the basic ui
@@ -107,29 +111,35 @@ class r34GUI:
         """Clears the app, as if it had just opened
         If a download is currently running, thats stopped too"""
         print("Cancel")
+        self.toggleUI(False)  # Make sure ui is disabled while we cancel
+
+        # clear variables
         self.searchTerm = None
         self.directory = None
         self.totalExpected = 0
         self.imgList = []
         self.stopFlag = True
         self.done = False
-        self.checkCanBegin()
 
         try:
             # wait for any download tasks to end
-            self.executor.shutdown(wait=True)
-            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._clearExecutor()
         except:
             pass
         self.stopFlag = False
 
+        # reset ui
         ui.searchInput.setText(self.searchTerm)
         ui.destinationLine.setText(self.directory)
+        ui.ckboxDownloadImages.setChecked(False)
+        ui.ckBoxDownloadVideos.setChecked(False)
+        ui.ckBoxSaveURLs.setChecked(False)
         ui.searchLCD.display(0)
         ui.ETA.setText("0 seconds")
         ui.currentTask.setText("Cancelled!")
         self.setProgBar()
         self.toggleUI(True)
+        self.checkCanBegin()
 
 
     def begin(self):
@@ -140,22 +150,17 @@ class r34GUI:
         # disable ui so user cant modify anything
         self.toggleUI(False)
 
-        with self.executor as ex:
-            # gathers images in a seperate thread to avoid blocking
-            future = ex.submit(self._gatherImages)
-            while not future.done():
-                app.processEvents()
-        self.executor.shutdown(wait=True)
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-
-        if ui.downloadLimit.value() != -1:
-            self.imgList = self.imgList[:ui.downloadLimit.value()]
+        # gathers images in a seperate thread to avoid blocking
+        future = self.executor.submit(self._gatherImages)
+        while not future.done():
+            app.processEvents()
+        self._clearExecutor()
 
         # the download function breaks the ui loop, so i put it in its own thread
         self.dwnTask = self.executor.submit(self._download)
-        while not self.done:
-            # while waiting for the download, keep the ui active
+        while not self.done:  # while waiting for the download, keep the ui active
             app.processEvents()
+
         self.totalExpected = 0
         self.imgList = []
         self.stopFlag = False
@@ -167,6 +172,7 @@ class r34GUI:
 
     def _gatherImages(self):
         """Gathers images from rule34 for a given tag"""
+        postList = []
         if self.totalExpected == 0:
             self.search()
         estimatedPages = math.ceil(self.totalExpected/100)
@@ -178,19 +184,39 @@ class r34GUI:
             newImages = r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
 
 
+
             # occasionally r34 gives duplicate posts, this catches that
             for image in newImages:
                 if any(x.id == image.id for x in self.imgList):
                     newImages.remove(image)
                     print("Removing duplicate")
-            self.imgList += newImages
+            postList += newImages
 
             ui.searchLCD.display(len(self.imgList))
+
+        # we now have an list of posts, but we need to process it
+        for post in postList:
+            video = (post.file_url.endswith("mp4") or post.file_url.endswith("wemb"))
+            if not ui.ckBoxDownloadVideos.isChecked():
+                # user has asked not to download videos, lets remove them from the list
+                if video:
+                    continue
+            elif ui.ckBoxDownloadVideos.isChecked() and not ui.ckboxDownloadImages.isChecked():
+                # user has asked for videos only, remove images
+                if not video:
+                    continue
+            self.imgList.append(post)
+
+
+        if ui.downloadLimit.value() != -1:
+            # if user has asked to limit, remove all extra posts
+            self.imgList = self.imgList[:ui.downloadLimit.value()]
+
         self.setProgBar(100)
 
     def _download(self):
         """The downloader itself"""
-        ui.currentTask.setText("Downloading")
+        ui.currentTask.setText(f"Downloading {len(self.imgList)} posts")
         directory = self.directory
         if ui.ckBoxSubfolder.isChecked():  # If the user wants a subfolder
             tempTag = re.compile('[^a-zA-Z]').sub('_', self.searchTerm)  # clear non alpha-numeric characters
@@ -219,7 +245,6 @@ class r34GUI:
             except ZeroDivisionError:
                 pass
 
-            ui.searchLCD.display(numDownloaded)
             ui.ETA.setText(f"{round(ETA)} seconds")
             self.setProgBar(int((numDownloaded/len(self.imgList))*100))
 
@@ -235,9 +260,9 @@ class r34GUI:
             try:
                 if ui.ckBoxSaveURLs.isChecked():
                     urlFile.write("\n" + image.file_url)
-                if ui.ckboxDownloadImages.isChecked() or ui.ckBoxDownloadVideos.isChecked():
 
-                    # allows the user to enable or disable downloads of certain things
+
+                if ui.ckboxDownloadImages.isChecked() or ui.ckBoxDownloadVideos.isChecked():
                     if video and not ui.ckBoxDownloadVideos.isChecked():
                         continue
                     if not video and not ui.ckboxDownloadImages.isChecked():
@@ -250,6 +275,7 @@ class r34GUI:
 
 
                 numDownloaded += 1
+                ui.searchLCD.display(numDownloaded)
             except Exception as e:
                 print(f"Skipping image due to error: {e}")
 
