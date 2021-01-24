@@ -1,111 +1,361 @@
+import math
 import os
-
+import re
+import sys
 import rule34
 import gui
-import sys
-import math
-import re
-import concurrent.futures
 import urllib.request
+import concurrent.futures
+from queue import Queue
 from timeit import default_timer as timer
+from time import sleep
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-app = QtWidgets.QApplication(sys.argv)
-app.setStyle("Fusion")
-R34Donwloader = QtWidgets.QMainWindow()
-r34 = rule34.Sync()
-ui = gui.Ui_Rule34Downloader()
 
-class r34GUI:
-    def __init__(self):
+class r34DwnldrGUI:
+    def __init__(self, _app: QtWidgets.QApplication):
         self.searchTerm = None  # The currently entered search term
         self.directory = None  # The save directory
-        self.totalExpected = 0  # how many images the program is expecting
-        self.imgList = []  # the list that holds images to be downloaded
-        self.stopFlag = False  # tells the download thread to stop
-        self.done = False  # is the download done?
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)  # the executor for the download thread
-        self.dwnTask = None  # the download thread itself
+        self.downloadImages = False
+        self.downloadVideos = False
+        self.saveURLS = False
+        self.createSubfolder = False
+        self.downloadLimit = -1
 
-    def _clearExecutor(self):
-        """Clears the executor, to avoid any access violations"""
-        self.executor.shutdown(wait=True)
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.r34 = rule34.Sync()
+        self.totalExpected = 0  # How many posts are expected
+        self.postList = []
 
-    def main(self):
-        # Create the basic ui
-        ui.setupUi(R34Donwloader)
-        R34Donwloader.resize(500, 450)
-        R34Donwloader.show()
+        self.stopFlag = False  # Tells the currently running threads to stop
+        self.done = False  # Set to true when the download completes
 
-        # clear any testing code, and block inputs in the destination line
-        ui.searchProgBar.setValue(0)
-        ui.destinationLine.setEnabled(False)
-        ui.ETA.setText("0 seconds")
-        ui.currentTask.setText("Idle")
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+        self.progBarQueue = Queue()
+        self.etaQueue = Queue()
+        self.lcdQueue = Queue()
+        self.currentTaskQueue = Queue()
+
+        self.app = _app
+        self.uiWindow = QtWidgets.QMainWindow()
+        self.ui = gui.Ui_Rule34Downloader()
+
+    @staticmethod
+    def processQueue(queue: Queue, uiSetFunc, name="unnamed"):
+        """
+        Processes a queue for ui events. Necessary to avoid access violations with PyQT (only main thread can set ui)
+
+        :param queue: a queue of ui values to be set
+        :param uiSetFunc: the function to handle setting these ui values
+        :param name: optional, the name of this queue (for debugging)
+        :return:
+        """
+        while not queue.empty():
+            value = queue.get()
+            # print(f"Processing {name} queue: {job}")
+            if value is not None:
+                uiSetFunc(value)
+
+    def clearExecutor(self, wait=True):
+        """Clears the executor, to avoid access violations
+        These tend to occur when the user tries to run 2 downloads without closing"""
+        print("s t o p")
+        self.stopFlag = True
+        self.executor.shutdown(wait=wait)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+    def runInExecutor(self, function, *args, **kwargs):
+        """Run a provided function in executor"""
+        future = self.executor.submit(function, *args, **kwargs)
+        while not future.done():
+            if self.stopFlag or self.uiWindow.isHidden():
+                # if uiWindow hidden, then the X button has been pressed
+                self.stopFlag = True
+                future.cancel()
+
+            # process any pending ui sets
+            self.processQueue(self.progBarQueue, self.ui.searchProgBar.setValue, name="ProgBar")
+            self.processQueue(self.etaQueue, self.ui.ETA.setText, name="ETA")
+            self.processQueue(self.lcdQueue, self.ui.searchLCD.display, name="LCD")
+            self.processQueue(self.currentTaskQueue, self.ui.currentTask.setText, name="CurrentTask")
+
+            # allow the ui system to process events
+            self.app.processEvents()
+        result = future.result()
+        return result
+
+
+    def _runAfterTask(self):
+        self.checkCanBegin()
+        self.ui.currentTask.setText("Idle")
+
+    def setupUI(self):
+        """Sets-up the ui"""
+        self.app.setStyle("Fusion")
+        self.ui.setupUi(self.uiWindow)
+        self.uiWindow.resize(500, 450)
+
+        self.ui.searchProgBar.setValue(0)
+        self.ui.destinationLine.setEnabled(False)
+        self.ui.ETA.setText("0 seconds")
+        self.ui.currentTask.setText("Idle")
 
         # setup events
-        ui.browseButton.clicked.connect(self.browse)
-        ui.searchButton.clicked.connect(self.search)
-        ui.beginButton.clicked.connect(self.begin)
-        ui.quitButton.clicked.connect(self._quit)
-        ui.cancelButton.clicked.connect(self.cancel)
-        ui.ckBoxSaveURLs.clicked.connect(self.checkCanBegin)
-        ui.ckboxDownloadImages.clicked.connect(self.checkCanBegin)
-        ui.ckBoxDownloadVideos.clicked.connect(self.checkCanBegin)
+        self.app.aboutToQuit.connect(self.quit)
+        self.ui.browseButton.clicked.connect(self.browse)
+        self.ui.searchButton.clicked.connect(self.search)
+        self.ui.beginButton.clicked.connect(self.begin)
+        self.ui.quitButton.clicked.connect(self.quit)
+        self.ui.cancelButton.clicked.connect(self.cancel)
+        self.ui.ckBoxSaveURLs.clicked.connect(self.checkCanBegin)
+        self.ui.ckboxDownloadImages.clicked.connect(self.checkCanBegin)
+        self.ui.ckBoxDownloadVideos.clicked.connect(self.checkCanBegin)
 
-    def setProgBar(self, value=0):
-        """Sets the progress bar percentage, defaults to 0"""
-        ui.searchProgBar.setValue(value)
+        self.uiWindow.show()
+
+    def clearUI(self):
+        """Clears all ui elements"""
+        self.ui.searchInput.setText(self.searchTerm)
+        self.ui.destinationLine.setText(self.directory)
+        self.ui.ckboxDownloadImages.setChecked(False)
+        self.ui.ckBoxDownloadVideos.setChecked(False)
+        self.ui.ckBoxSaveURLs.setChecked(False)
+        self.ui.searchLCD.display(0)
+        self.ui.ETA.setText("0 seconds")
+        self.ui.searchProgBar.setValue(0)
+        # self.setProgBar()
 
     def toggleUI(self, state: bool):
         """Allows you to disable all input ui, useful when downloading"""
-        ui.searchButton.setEnabled(state)
-        ui.browseButton.setEnabled(state)
-        ui.beginButton.setEnabled(state)
-        ui.ckBoxSaveURLs.setEnabled(state)
-        ui.ckboxDownloadImages.setEnabled(state)
-        ui.ckBoxSubfolder.setEnabled(state)
-        ui.ckBoxDownloadVideos.setEnabled(state)
-        ui.downloadLimit.setEnabled(state)
+        self.ui.searchButton.setEnabled(state)
+        self.ui.browseButton.setEnabled(state)
+        self.ui.beginButton.setEnabled(state)
+        self.ui.ckBoxSaveURLs.setEnabled(state)
+        self.ui.ckboxDownloadImages.setEnabled(state)
+        self.ui.ckBoxSubfolder.setEnabled(state)
+        self.ui.ckBoxDownloadVideos.setEnabled(state)
+        self.ui.downloadLimit.setEnabled(state)
 
     def checkCanBegin(self):
         """Checks if the program has all the information needed to download"""
-        print("Checking if able to begin")
         if self.searchTerm is not None and self.directory is not None:
-            if ui.ckboxDownloadImages.isChecked() or ui.ckBoxDownloadVideos.isChecked() or ui.ckBoxSaveURLs.isChecked():
-                # the program needs something to do, so this assures that there is at least 1 task
-                return ui.beginButton.setEnabled(True)
-        return ui.beginButton.setEnabled(False)  # disable the begin button
+            # if user has given a search term and a directory
+            if self.ui.ckBoxSaveURLs.isChecked() or self.ui.ckBoxDownloadVideos.isChecked() or self.ui.ckboxDownloadImages.isChecked():
+                # if the user has chosen at least 1 task
+                return self.ui.beginButton.setEnabled(True)
+        return self.ui.beginButton.setEnabled(False)  # Disables the begin button
+
+    def cacheUI(self):
+        """Caches the currently set options in the ui, so the threads dont need to access ui"""
+        self.search()
+        self.downloadImages = self.ui.ckboxDownloadImages.isChecked()
+        self.downloadVideos = self.ui.ckBoxDownloadVideos.isChecked()
+        self.saveURLS = self.ui.ckBoxSaveURLs.isChecked()
+        self.createSubfolder = self.ui.ckBoxSubfolder.isChecked()
+        self.downloadLimit = self.ui.downloadLimit.value()
+
+    def _gatherPosts(self):
+        """Gathers posts from rule34 for a given tag"""
+        postList = []
+
+        if self.totalExpected == 0:
+            self.search()
+        estimatedPages = math.ceil(self.totalExpected/100)
+        times = []
+
+        # you could just gather all images at once, but because i want a progress bar, i have to do it manually
+        for i in range(estimatedPages):
+            start = timer()
+            if self.stopFlag:
+                return
+            self.progBarQueue.put(int(
+                (i / estimatedPages) * 100
+            ))
+            averageTime = sum(times) / len(times) if len(times) != 0 else 0.423
+            eta = (estimatedPages-i) * averageTime
+            if eta < 60:
+                self.etaQueue.put(
+                    f"{eta:.3} seconds"
+                )
+            else:
+                self.etaQueue.put(
+                    f"{eta/60:.3} minutes"
+                )
+            page = self.r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
+
+            # process this page
+            for post in page:
+                video = (post.file_url.endswith("mp4") or post.file_url.endswith("webm"))  # is this a video?
+                if self.downloadImages or self.downloadVideos:
+                    if not self.downloadVideos:
+                        # if user doesnt want videos
+                        if video:
+                            continue
+                    elif self.downloadVideos and not self.downloadImages:
+                        # if user wants videos, but not images
+                        if not video:
+                            continue
+                postList.append(post)
+
+            self.lcdQueue.put(len(postList))
+
+            # apply download limit if set
+            if self.downloadLimit != -1:
+                postList = postList[:self.downloadLimit]
+
+            self.postList = postList
+            end = timer()
+            times.append(end-start)
+            times = times[-100:]
+        average = sum(times) / len(times)
+        print(f"Average time: {average}")
+        self.progBarQueue.put(100)
+        return
+
+    def _download(self):
+        """Downloads all posts in postList"""
+        self.currentTaskQueue.put(f"Downloading {len(self.postList)} posts")
+        # process directory
+        directory = self.directory
+        if self.createSubfolder:
+            tempTag = re.compile('[^a-zA-Z]').sub('_', self.searchTerm)  # clear non alpha-numeric characters
+            newPathName = '_'.join(tempTag.split(" "))  # clear spaces
+            directory += f"/{newPathName}"
+            if not os.path.isdir(directory):
+                print("creating sub-folder")
+                os.mkdir(directory)
+
+        numDownloaded = 0  # How many posts have been downloaded
+        ETA = 0  # how many seconds estimated left
+        times = []  # stores a list of execution times
+        urlFile = None  # the file for saving urls, if used
+
+        if self.saveURLS:
+            # if the user wants urls saved, create the file here
+            print("Creating url file")
+            urlFileDir = f"{directory}/urls.txt"
+            urlFile = open(urlFileDir, "w")
+            urlFile.write(f"### URLs for search: {self.searchTerm} ###\n")
+
+        for post in self.postList:
+            average = (sum(times) / len(times)) if len(times) != 0 else 5
+            ETA = average * (len(self.postList) - numDownloaded)
+            if ETA < 60:
+                self.etaQueue.put(
+                    f"{ETA:.3} seconds"
+                )
+            else:
+                self.etaQueue.put(
+                    f"{ETA/60:.3} minutes"
+                )
+
+            self.progBarQueue.put(int(
+                numDownloaded/len(self.postList)*100
+            ))
+
+            start = timer()
+            if self.stopFlag:
+                self.stopFlag = False
+                if urlFile:
+                    urlFile.close()
+                self.done = True
+                return
+
+            name = "{}/{}.{}".format(directory, post.id.split("/")[-1], post.file_url.split(".")[-1])
+            video = ("webm" in name or "mp4" in name)
+
+            try:
+                if self.saveURLS:
+                    print("Writing to file")
+                    urlFile.write("\n" + post.file_url)
+
+                if self.downloadImages or self.downloadVideos:
+                    if video and not self.downloadVideos:
+                        continue
+                    if not video and not self.downloadImages:
+                        continue
+
+                    if not os.path.isfile(name):
+                        with urllib.request.urlopen(post.file_url) as f:
+                            imageContent = f.read()
+                            # i use a download temp file because if the download is interrupted,
+                            # its obvious which is the garbled file
+                            with open(f"{directory}/download.temp", "wb") as _f:
+                                _f.write(imageContent)
+                            os.rename(f"{directory}/download.temp", name)
+
+                numDownloaded += 1
+                self.lcdQueue.put(numDownloaded)
+            except Exception as e:
+                print(f"Skipping post due to error: {e}")
+
+            end = timer()
+            times.append(end-start)
+            times = times[-100:]
+        if urlFile:
+            urlFile.close()
+
+        self.done = True
+        return
+
+# region: button actions
+
 
     def browse(self):
-        """Sets the download destination"""
-        print("Opening browse window")
-        ui.currentTask.setText("Waiting for directory")
-        self.directory = str(QtWidgets.QFileDialog.getExistingDirectory(R34Donwloader, "Select Directory"))
-        ui.destinationLine.setText(self.directory)
-        print(f"Destination has been set to {self.directory}")
-        self.checkCanBegin()
-        ui.currentTask.setText("Idle")
+        """Opens the browse menu"""
+        print("Browse button pressed")
+        self.ui.currentTask.setText("Waiting for directory")
 
+        # open a directory selection dialogue
+        self.directory = str(QtWidgets.QFileDialog.getExistingDirectory(self.uiWindow, "Select Directory"))
+        self.ui.destinationLine.setText(self.directory)
+
+        self._runAfterTask()
 
     def search(self):
-        """Calls rule34 to search for images with the given tag"""
-        ui.currentTask.setText("Searching Rule34")
-        self.searchTerm = ui.searchInput.text().replace(",", "")
-        print(f"Searching for {self.searchTerm}")
-        self.setProgBar(25)
-        # technically this call blocks the main thread, but it does it so quickly it really doesnt matter
-        self.totalExpected = r34.totalImages(self.searchTerm)
-        self.setProgBar(100)
-        ui.searchLCD.display(str(self.totalExpected))
-        self.checkCanBegin()
-        ui.currentTask.setText("Idle")
+        """Calls rule34 to search for images with given tag(s)"""
+        print("Search button pressed")
+        self.ui.currentTask.setText("Searching Rule34")
 
+        self.searchTerm = self.ui.searchInput.text().replace(",", "").strip()
+        self.ui.searchProgBar.setValue(25)
+        # self.setProgBar(25)
 
-    def _quit(self):
-        """As the name suggests"""
-        sys.exit(app.exec_())
+        # technically this shouldn't need its own thread, but in theory it could crash the main thread, so im being safe
+        self.totalExpected = self.runInExecutor(self.r34.totalImages, self.searchTerm)
+        self.ui.searchProgBar.setValue(100)
+        # self.setProgBar(100)
+        self.ui.searchLCD.display(self.totalExpected)
+
+        self._runAfterTask()
+
+    def begin(self):
+        """Prepares the postList and starts the download"""
+        print("Begin button pressed")
+        self.ui.currentTask.setText("Gathering and validating posts")
+
+        # disable the ui so user cant modify anything
+        self.toggleUI(False)
+        self.cacheUI()
+        # gathers posts from r34 in separate thread
+        self.runInExecutor(self._gatherPosts)
+
+        self.runInExecutor(self._download)
+
+        self.totalExpected = 0
+        self.imgList = []
+        self.stopFlag = False
+        self.ui.ETA.setText("0 seconds")
+        if self.done:
+            self.ui.currentTask.setText("Download Complete!")
+            self.ui.searchProgBar.setValue(100)
+
+            # flash taskbar icon, and make a notification sound
+            self.app.alert(self.uiWindow, msecs=0)
+            self.app.beep()
+
+        self.done = False
+        self.toggleUI(True)
 
     def cancel(self):
         """Clears the app, as if it had just opened
@@ -123,177 +373,30 @@ class r34GUI:
 
         try:
             # wait for any download tasks to end
-            self._clearExecutor()
+            self.clearExecutor()
         except:
             pass
         self.stopFlag = False
 
-        # reset ui
-        ui.searchInput.setText(self.searchTerm)
-        ui.destinationLine.setText(self.directory)
-        ui.ckboxDownloadImages.setChecked(False)
-        ui.ckBoxDownloadVideos.setChecked(False)
-        ui.ckBoxSaveURLs.setChecked(False)
-        ui.searchLCD.display(0)
-        ui.ETA.setText("0 seconds")
-        ui.currentTask.setText("Cancelled!")
-        self.setProgBar()
+        self.clearUI()
+        self.ui.currentTask.setText("Cancelled!")
         self.toggleUI(True)
         self.checkCanBegin()
 
+    def quit(self):
+        """As the name suggests"""
+        print("Quit button pressed")
+        self.clearExecutor(wait=False)
+        self.app.exit()
 
-    def begin(self):
-        """Prepares the imagelist and starts the download"""
-        print("Begin")
-        ui.currentTask.setText("Gathering and validating posts")
-
-        # disable ui so user cant modify anything
-        self.toggleUI(False)
-
-        # gathers images in a seperate thread to avoid blocking
-        future = self.executor.submit(self._gatherImages)
-        while not future.done():
-            app.processEvents()
-        self._clearExecutor()
-
-        # the download function breaks the ui loop, so i put it in its own thread
-        self.dwnTask = self.executor.submit(self._download)
-        while not self.done:  # while waiting for the download, keep the ui active
-            app.processEvents()
-
-        self.totalExpected = 0
-        self.imgList = []
-        self.stopFlag = False
-        self.done = False
-        ui.ETA.setText("0 seconds")
-        ui.currentTask.setText("Download Complete!")
-        self.setProgBar(100)
-        self.toggleUI(True)
-
-    def _gatherImages(self):
-        """Gathers images from rule34 for a given tag"""
-        postList = []
-        if self.totalExpected == 0:
-            self.search()
-        estimatedPages = math.ceil(self.totalExpected/100)
-        # you could just gather all images at once, but because i want a progress bar, i iterate through the pages myself
-        for i in range(estimatedPages):
-            if self.stopFlag:
-                return
-            self.setProgBar(int((i / estimatedPages) * 100))
-            newImages = r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
+# endregion
 
 
 
-            # occasionally r34 gives duplicate posts, this catches that
-            for image in newImages:
-                if any(x.id == image.id for x in self.imgList):
-                    newImages.remove(image)
-                    print("Removing duplicate")
-            postList += newImages
 
-            ui.searchLCD.display(len(self.imgList))
-
-        # we now have an list of posts, but we need to process it
-        for post in postList:
-            video = (post.file_url.endswith("mp4") or post.file_url.endswith("wemb"))
-            if not ui.ckBoxDownloadVideos.isChecked():
-                # user has asked not to download videos, lets remove them from the list
-                if video:
-                    continue
-            elif ui.ckBoxDownloadVideos.isChecked() and not ui.ckboxDownloadImages.isChecked():
-                # user has asked for videos only, remove images
-                if not video:
-                    continue
-            self.imgList.append(post)
-
-
-        if ui.downloadLimit.value() != -1:
-            # if user has asked to limit, remove all extra posts
-            self.imgList = self.imgList[:ui.downloadLimit.value()]
-
-        self.setProgBar(100)
-
-    def _download(self):
-        """The downloader itself"""
-        ui.currentTask.setText(f"Downloading {len(self.imgList)} posts")
-        directory = self.directory
-        if ui.ckBoxSubfolder.isChecked():  # If the user wants a subfolder
-            tempTag = re.compile('[^a-zA-Z]').sub('_', self.searchTerm)  # clear non alpha-numeric characters
-            newPathName = '_'.join(tempTag.split(" "))  # clear spaces
-            directory += f"/{newPathName}"
-            if not os.path.isdir(directory):
-                print("creating sub-folder")
-                os.mkdir(directory)
-
-        numDownloaded = 0
-        ETA = 0
-        times = []
-        urlFileDir = None  # stores the directory of the urlfile, unused
-        urlFile = None
-        if ui.ckBoxSaveURLs.isChecked():
-            # if the user wants urls saved, create the file here
-            urlFileDir = f"{directory}/urls.txt"
-            urlFile = open(urlFileDir, "w")
-            urlFile.write(f"### URLs for search: {self.searchTerm} ###\n")
-
-        for image in self.imgList:
-            # ui update
-            try:
-                average = (sum(times) / len(times))
-                ETA = average * (len(self.imgList) - numDownloaded)
-            except ZeroDivisionError:
-                pass
-
-            ui.ETA.setText(f"{round(ETA)} seconds")
-            self.setProgBar(int((numDownloaded/len(self.imgList))*100))
-
-            start = timer()
-            if self.stopFlag:
-                self.stopFlag = False
-                if urlFile:
-                    urlFile.close()
-                self.done = True
-                return
-            name = "{}/{}.{}".format(directory, image.id.split("/")[-1], image.file_url.split(".")[-1])
-            video = ("webm" in name or "mp4" in name)
-            try:
-                if ui.ckBoxSaveURLs.isChecked():
-                    urlFile.write("\n" + image.file_url)
-
-
-                if ui.ckboxDownloadImages.isChecked() or ui.ckBoxDownloadVideos.isChecked():
-                    if video and not ui.ckBoxDownloadVideos.isChecked():
-                        continue
-                    if not video and not ui.ckboxDownloadImages.isChecked():
-                        continue
-
-                    with urllib.request.urlopen(image.file_url) as f:
-                        imageContent = f.read()
-                        with open(name, "wb") as f:
-                            f.write(imageContent)
-
-
-                numDownloaded += 1
-                ui.searchLCD.display(numDownloaded)
-            except Exception as e:
-                print(f"Skipping image due to error: {e}")
-
-            end = timer()
-            times.append(end - start)
-            times = times[-30:]
-        if urlFile:
-            urlFile.close()
-
-        self.done = True
-        return
-
-
-
-if __name__ == "__main__":
-    _r34GUI = r34GUI()
-    try:
-        _r34GUI.main()
-    except Exception as e:
-        print(e)
+if __name__ == '__main__':
+    app = QtWidgets.QApplication(sys.argv)
+    _r34D = r34DwnldrGUI(app)
+    _r34D.setupUI()
     sys.exit(app.exec_())
+
