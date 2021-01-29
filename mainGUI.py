@@ -175,11 +175,11 @@ class r34DwnldrGUI:
             eta = (estimatedPages-i) * averageTime
             if eta < 60:
                 self.etaQueue.put(
-                    f"{eta:.3} seconds"
+                    f"{float(eta):.3} seconds"
                 )
             else:
                 self.etaQueue.put(
-                    f"{eta/60:.3} minutes"
+                    f"{float(eta)/60:.3} minutes"
                 )
             page = self.r34.getImages(singlePage=True, OverridePID=i, tags=self.searchTerm)
 
@@ -242,11 +242,11 @@ class r34DwnldrGUI:
             ETA = average * (len(self.postList) - numDownloaded)
             if ETA < 60:
                 self.etaQueue.put(
-                    f"{ETA:.3} seconds"
+                    f"{float(ETA):.3} seconds"
                 )
             else:
                 self.etaQueue.put(
-                    f"{ETA/60:.3} minutes"
+                    f"{float(ETA)/60:.3} minutes"
                 )
 
             self.progBarQueue.put(int(
