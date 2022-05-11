@@ -10,6 +10,7 @@ from queue import Queue
 from timeit import default_timer as timer
 from time import sleep
 from PyQt5 import QtCore, QtGui, QtWidgets
+from os import path
 
 
 class r34DwnldrGUI:
@@ -20,6 +21,7 @@ class r34DwnldrGUI:
         self.downloadVideos = False
         self.saveURLS = False
         self.createSubfolder = False
+        self.batchDownload = False
         self.downloadLimit = -1
 
         self.r34 = rule34.Sync()
@@ -110,6 +112,7 @@ class r34DwnldrGUI:
         self.ui.ckBoxSaveURLs.clicked.connect(self.checkCanBegin)
         self.ui.ckboxDownloadImages.clicked.connect(self.checkCanBegin)
         self.ui.ckBoxDownloadVideos.clicked.connect(self.checkCanBegin)
+        self.ui.ckboxBatchDownload.clicked.connect(self.checkCanBegin)
 
         self.uiWindow.show()
 
@@ -120,6 +123,7 @@ class r34DwnldrGUI:
         self.ui.ckboxDownloadImages.setChecked(False)
         self.ui.ckBoxDownloadVideos.setChecked(False)
         self.ui.ckBoxSaveURLs.setChecked(False)
+        self.ui.ckboxBatchDownload.setChecked(False)
         self.ui.searchLCD.display(0)
         self.ui.ETA.setText("0 seconds")
         self.ui.searchProgBar.setValue(0)
@@ -134,10 +138,14 @@ class r34DwnldrGUI:
         self.ui.ckboxDownloadImages.setEnabled(state)
         self.ui.ckBoxSubfolder.setEnabled(state)
         self.ui.ckBoxDownloadVideos.setEnabled(state)
+        self.ui.ckboxBatchDownload.setEnabled(state)
         self.ui.downloadLimit.setEnabled(state)
 
     def checkCanBegin(self):
         """Checks if the program has all the information needed to download"""
+        if self.ui.ckboxBatchDownload.isChecked() and self.directory is not None:
+            if self.ui.ckBoxDownloadVideos.isChecked() or self.ui.ckboxDownloadImages.isChecked():
+                return self.ui.beginButton.setEnabled(True)
         if self.searchTerm is not None and self.directory is not None:
             # if user has given a search term and a directory
             if self.ui.ckBoxSaveURLs.isChecked() or self.ui.ckBoxDownloadVideos.isChecked() or self.ui.ckboxDownloadImages.isChecked():
@@ -152,6 +160,7 @@ class r34DwnldrGUI:
         self.downloadVideos = self.ui.ckBoxDownloadVideos.isChecked()
         self.saveURLS = self.ui.ckBoxSaveURLs.isChecked()
         self.createSubfolder = self.ui.ckBoxSubfolder.isChecked()
+        self.batchDownload = self.ui.ckboxBatchDownload.isChecked()
         self.downloadLimit = self.ui.downloadLimit.value()
 
     def _gatherPosts(self):
@@ -331,31 +340,40 @@ class r34DwnldrGUI:
 
     def begin(self):
         """Prepares the postList and starts the download"""
-        print("Begin button pressed")
-        self.ui.currentTask.setText("Gathering and validating posts")
+        batchList = []
+        if self.ui.ckboxBatchDownload.isChecked():
+            batchList = self.getBatchList()
 
-        # disable the ui so user cant modify anything
-        self.toggleUI(False)
-        self.cacheUI()
-        # gathers posts from r34 in separate thread
-        self.runInExecutor(self._gatherPosts)
+        if not self.ui.ckboxBatchDownload.isChecked():
+            batchList = [self.ui.searchInput.text().replace(",", "").strip()]
 
-        self.runInExecutor(self._download)
+        for item in batchList:
+            print("Begin button pressed")
+            self.ui.currentTask.setText("Gathering and validating posts")
+            self.ui.searchInput.setText(item)
 
-        self.totalExpected = 0
-        self.imgList = []
-        self.stopFlag = False
-        self.ui.ETA.setText("0 seconds")
-        if self.done:
-            self.ui.currentTask.setText("Download Complete!")
-            self.ui.searchProgBar.setValue(100)
+            # disable the ui so user cant modify anything
+            self.toggleUI(False)
+            self.cacheUI()
+            # gathers posts from r34 in separate thread
+            self.runInExecutor(self._gatherPosts)
 
-            # flash taskbar icon, and make a notification sound
-            self.app.alert(self.uiWindow, msecs=0)
-            self.app.beep()
+            self.runInExecutor(self._download)
 
-        self.done = False
-        self.toggleUI(True)
+            self.totalExpected = 0
+            self.imgList = []
+            self.stopFlag = False
+            self.ui.ETA.setText("0 seconds")
+            if self.done:
+                self.ui.currentTask.setText("Download Complete!")
+                self.ui.searchProgBar.setValue(100)
+
+                # flash taskbar icon, and make a notification sound
+                self.app.alert(self.uiWindow, msecs=0)
+                self.app.beep()
+
+            self.done = False
+            self.toggleUI(True)
 
     def cancel(self):
         """Clears the app, as if it had just opened
@@ -388,6 +406,18 @@ class r34DwnldrGUI:
         print("Quit button pressed")
         self.clearExecutor(wait=False)
         self.app.exit()
+
+    def getBatchList(self):
+        list = path.join(path.dirname(sys.argv[0]), 'list.txt')
+        importList = open(list, 'r')
+        listData = importList.read().splitlines()
+        importList.close()
+        return listData
+
+    def getSearchTerm(self):
+        if self.ui.ckboxBatchDownload.isChecked():
+            return self.ui.searchInput
+        return self.ui.searchInput.text().replace(",", "").strip()
 
 # endregion
 
