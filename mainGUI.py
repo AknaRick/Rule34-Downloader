@@ -340,40 +340,42 @@ class r34DwnldrGUI:
 
     def begin(self):
         """Prepares the postList and starts the download"""
-        batchList = []
         if self.ui.ckboxBatchDownload.isChecked():
+            batchList = []
             batchList = self.getBatchList()
+            for item in batchList:
+                self.down_main(item)
 
         if not self.ui.ckboxBatchDownload.isChecked():
-            batchList = [self.ui.searchInput.text().replace(",", "").strip()]
+            self.down_main(self.ui.searchInput.text().replace(",", "").strip())
 
-        for item in batchList:
-            print("Begin button pressed")
-            self.ui.currentTask.setText("Gathering and validating posts")
-            self.ui.searchInput.setText(item)
+    def down_main(self, item):
+        print("Begin button pressed")
+        self.ui.currentTask.setText("Gathering and validating posts")
+        self.ui.searchInput.setText(item)
 
-            # disable the ui so user cant modify anything
-            self.toggleUI(False)
-            self.cacheUI()
-            # gathers posts from r34 in separate thread
-            self.runInExecutor(self._gatherPosts)
+        # disable the ui so user cant modify anything
+        self.toggleUI(False)
+        self.cacheUI()
+        # gathers posts from r34 in separate thread
+        self.runInExecutor(self._gatherPosts)
 
-            self.runInExecutor(self._download)
+        self.runInExecutor(self._download)
 
-            self.totalExpected = 0
-            self.imgList = []
-            self.stopFlag = False
-            self.ui.ETA.setText("0 seconds")
-            if self.done:
-                self.ui.currentTask.setText("Download Complete!")
-                self.ui.searchProgBar.setValue(100)
+        self.totalExpected = 0
+        self.imgList = []
+        self.stopFlag = False
+        self.ui.ETA.setText("0 seconds")
+        if self.done:
+            self.ui.currentTask.setText("Download Complete!")
+            self.ui.searchProgBar.setValue(100)
 
-                # flash taskbar icon, and make a notification sound
-                self.app.alert(self.uiWindow, msecs=0)
-                self.app.beep()
+            # flash taskbar icon, and make a notification sound
+            self.app.alert(self.uiWindow, msecs=0)
+            self.app.beep()
 
-            self.done = False
-            self.toggleUI(True)
+        self.done = False
+        self.toggleUI(True)
 
     def cancel(self):
         """Clears the app, as if it had just opened
@@ -413,11 +415,6 @@ class r34DwnldrGUI:
         listData = importList.read().splitlines()
         importList.close()
         return listData
-
-    def getSearchTerm(self):
-        if self.ui.ckboxBatchDownload.isChecked():
-            return self.ui.searchInput
-        return self.ui.searchInput.text().replace(",", "").strip()
 
 # endregion
 
